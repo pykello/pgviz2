@@ -4,6 +4,7 @@ import cats.effect.IO
 import org.http4s._
 import org.http4s.implicits._
 import munit.CatsEffectSuite
+import net.moshayedi.dsserver.pg.PostgresREST
 
 class PostgresSpec extends CatsEffectSuite {
 
@@ -17,7 +18,7 @@ class PostgresSpec extends CatsEffectSuite {
 
   private[this] val retHelloWorld: IO[Response[IO]] = {
     val getHW = Request[IO](Method.GET, uri"/hello/world")
-    val helloWorld = Postgres.impl[IO]
+    val helloWorld = PostgresREST.impl[IO]
     DSRoutes.postgresRoutes(helloWorld).orNotFound(getHW)
   }
 }

@@ -4,6 +4,7 @@ import cats.effect.{Async, Resource}
 import cats.syntax.all._
 import com.comcast.ip4s._
 import fs2.Stream
+import net.moshayedi.dsserver.pg.PostgresREST
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
@@ -14,7 +15,7 @@ object DSServer {
   def stream[F[_]: Async]: Stream[F, Nothing] = {
     for {
       _ <- Stream.resource(EmberClientBuilder.default[F].build)
-      helloWorldAlg = Postgres.impl[F]
+      helloWorldAlg = PostgresREST.impl[F]
 
       // Combine Service Routes into an HttpApp.
       // Can also be done via a Router if you
