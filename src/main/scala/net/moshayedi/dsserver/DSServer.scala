@@ -1,29 +1,34 @@
 package net.moshayedi.dsserver
 
-import cats.effect.{Async, Resource}
+import cats.effect.{Async, Resource, Sync}
 import cats.syntax.all._
 import com.comcast.ip4s._
 import fs2.Stream
 import net.moshayedi.dsserver.pg.PostgresREST
+import org.http4s.HttpRoutes
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
+import org.http4s.server.Router
 import org.http4s.server.middleware.Logger
 
 object DSServer {
 
+  def routes[F[_]: Sync](): HttpRoutes[F] =
+    Router[F](
+      "/pg" -> PostgresREST.routes(),
+    )
+
   def stream[F[_]: Async]: Stream[F, Nothing] = {
     for {
       _ <- Stream.resource(EmberClientBuilder.default[F].build)
-      helloWorldAlg = PostgresREST.impl[F]
 
       // Combine Service Routes into an HttpApp.
       // Can also be done via a Router if you
       // want to extract a segments not checked
       // in the underlying routes.
       httpApp = (
-        DSRoutes.postgresRoutes[F](helloWorldAlg)
-        /* <+> ... other routes */
+        routes()
       ).orNotFound
 
       // With Middlewares in place
