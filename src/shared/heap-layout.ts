@@ -24,5 +24,13 @@ export function heapRegions(page: HeapPage): HeapRegion[] {
     add(bitmapEnd, data, 'padding', `Tuple ${item.lp} header padding`, item);
     add(data, end, 'tuple', `Tuple ${item.lp} data`, item);
   }
+  // Gaps inside the storage area are not part of either neighboring tuple.
+  // They may be alignment slack or holes left by page maintenance.
+  let end = page.header.upper;
+  for (const r of [...regions].filter(r => r.tuple).sort((a, b) => a.start - b.start)) {
+    if (r.start > end) add(end, r.start, 'storage-gap', 'Unreferenced tuple storage');
+    end = Math.max(end, r.end);
+  }
+  add(end, page.header.special, 'storage-gap', 'Unreferenced tuple storage');
   return regions.sort((a, b) => a.start - b.start);
 }

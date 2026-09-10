@@ -26,3 +26,11 @@ test('adjacent tuples may share a cell without sharing header bytes', async () =
   page.items[0]!.lp_flags = 2;
   assert.equal(heapRegions(page).some(r => r.tuple?.lp === 1), false);
 });
+
+test('unreferenced storage gaps stay outside tuple boundaries', async () => {
+  const page = await new Demo().request('heap', { oid: '2', block: '0' });
+  page.items = [{ ...page.items[0]!, lp_off: 8088, lp_len: 97 }];
+  page.header.upper = 8088;
+  const gaps = heapRegions(page).filter(r => r.kind === 'storage-gap');
+  assert.deepEqual(gaps.map(r => [r.start, r.end, r.tuple]), [[8185, 8192, undefined]]);
+});

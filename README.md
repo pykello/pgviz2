@@ -21,7 +21,10 @@ older tuple versions. Click a line pointer in the grid or the pointer list
 to outline its target tuple; redirect pointers follow their destination.
 Each 16-byte cell is subdivided at exact byte boundaries: stripes mark
 tuple headers and null bitmaps, gray marks header padding, and data labels
-stay within the data region. Clicking a fragment selects its own tuple.
+stay within the data region. Light-gray gaps between tuples represent
+unreferenced storage, including alignment slack; white is the main free
+space area. Clicking a fragment outlines only its own tuple, with header
+and data byte ranges shown in the inspector.
 Unknown types and compressed/external TOAST values
 remain raw; columns absent from an older tuple are marked as not stored.
 

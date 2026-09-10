@@ -30,7 +30,7 @@ async function api<K extends Route>(route: K, args: Record<string, string | numb
 }
 function fail(e: unknown) { $('error').hidden = false; $('error').textContent = e instanceof Error ? e.message : String(e); }
 function run(action: () => Promise<void>) { void action().catch(fail); }
-function emptyInspector() { selectedHeap = undefined; document.querySelectorAll('.tuple-outline').forEach(el => el.remove()); document.querySelectorAll('[data-pointer]').forEach(el => el.setAttribute('aria-pressed', 'false')); selected = undefined; detailId++; $('details').replaceChildren(); $('inspector').hidden = true; $('workarea').classList.remove('has-selection'); document.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected')); }
+function emptyInspector() { document.querySelectorAll('.byte-cell.selected').forEach(el => el.classList.remove('selected')); selectedHeap = undefined; document.querySelectorAll('.tuple-outline').forEach(el => el.remove()); document.querySelectorAll('[data-pointer]').forEach(el => el.setAttribute('aria-pressed', 'false')); selected = undefined; detailId++; $('details').replaceChildren(); $('inspector').hidden = true; $('workarea').classList.remove('has-selection'); document.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected')); }
 function setDetails(html: string) { $('inspector').hidden = false; $('workarea').classList.add('has-selection'); $('details').innerHTML = html; }
 function renderRelations() {
   if (view === 'home') {
@@ -338,13 +338,13 @@ function renderHeap() {
       b.append(part);
     }
     b.onclick = e => {
-      document.querySelectorAll('.byte-cell.selected').forEach(c => c.classList.remove('selected')); b.classList.add('selected');
+      document.querySelectorAll('.byte-cell.selected').forEach(c => c.classList.remove('selected'));
       // Mouse clicks use the exact byte fragment; keyboard clicks use the
       // first region in the cell. Pointer buttons remain individually usable.
       const fragment = (e.target as HTMLElement).closest<HTMLElement>('.heap-byte-region');
       const tuple = fragment ? h.items.find(i => i.lp === Number(fragment.dataset.lp)) : e.detail === 0 ? parts.find(r => r.tuple)?.tuple : undefined;
       if (tuple) inspectTuple(tuple);
-      else { emptyInspector(); setDetails(`<h3>${esc(fragment?.title.split(' · bytes')[0] ?? b.title.split(' · bytes')[0])}</h3>${offset < 24 ? fields(h.header) : `<p>Byte offset ${offset}.</p>`}<h4>BYTES ${offset}–${offset + 15}</h4><pre>${esc(h.raw.slice(offset * 2, (offset + 16) * 2).match(/../g)?.join(' '))}</pre>`); }
+      else { emptyInspector(); b.classList.add('selected'); setDetails(`<h3>${esc(fragment?.title.split(' · bytes')[0] ?? b.title.split(' · bytes')[0])}</h3>${offset < 24 ? fields(h.header) : `<p>Byte offset ${offset}.</p>`}<h4>BYTES ${offset}–${offset + 15}</h4><pre>${esc(h.raw.slice(offset * 2, (offset + 16) * 2).match(/../g)?.join(' '))}</pre>`); }
     }; $('bytes').append(b);
   }
   renderHeapOverlays();
@@ -361,16 +361,21 @@ function renderHeapOverlays() {
   if (view !== 'heap' || !heap || !grid) return;
   grid.querySelectorAll('.heap-value, .heap-pointer, .tuple-outline').forEach(label => label.remove());
   const cells = [...grid.querySelectorAll<HTMLElement>('.byte-cell')];
+  const origin = grid.getBoundingClientRect();
+  const bounds = cells.map(cell => {
+    const r = cell.getBoundingClientRect();
+    return { left: r.left - origin.left - grid.clientLeft, top: r.top - origin.top - grid.clientTop, width: r.width, height: r.height };
+  });
   const rectangles = (start: number, end: number) => {
     const rows: { left: number; top: number; right: number; height: number }[] = [];
     if (start < 0 || end > heap!.header.pagesize || end <= start) return rows;
     for (let i = Math.floor(start / 16); i < Math.ceil(end / 16); i++) {
-      const cell = cells[i]; if (!cell) continue;
-      const left = cell.offsetLeft + Math.max(0, start - i * 16) / 16 * cell.offsetWidth;
-      const right = cell.offsetLeft + Math.min(16, end - i * 16) / 16 * cell.offsetWidth;
+      const cell = bounds[i]; if (!cell) continue;
+      const left = cell.left + Math.max(0, start - i * 16) / 16 * cell.width;
+      const right = cell.left + Math.min(16, end - i * 16) / 16 * cell.width;
       const row = rows.at(-1);
-      if (row?.top === cell.offsetTop) row.right = right;
-      else rows.push({ left, right, top: cell.offsetTop, height: cell.offsetHeight });
+      if (row?.top === cell.top) row.right = right;
+      else rows.push({ left, right, top: cell.top, height: cell.height });
     }
     return rows;
   };
@@ -414,9 +419,9 @@ function renderHeapOverlays() {
 }
 new ResizeObserver(renderHeapOverlays).observe($('canvas'));
 function inspectTuple(item: HeapItem) {
-  if (!heap) return; const h = heap; selectedHeap = item.lp; renderHeapOverlays();
+  if (!heap) return; const h = heap; document.querySelectorAll('.byte-cell.selected').forEach(el => el.classList.remove('selected')); selectedHeap = item.lp; renderHeapOverlays();
   const raw = item.lp_flags === 1 ? h.raw.slice(item.lp_off * 2, (item.lp_off + item.lp_len) * 2) : '';
-  setDetails(`<span class="pill">HEAP TUPLE</span><h3>(${h.block},${item.lp})</h3><div class="actions" id="tuple-actions"></div>${item.values?.length ? '<h4>Values</h4>' + fields(Object.fromEntries(item.values.map(v => [v.name, v.value ?? (v.state === 'absent' ? 'Not stored in this tuple' : `Raw (${v.type})`)]))) : ''}${fields({ State: ['Unused', 'Normal', 'HOT redirect', 'Dead'][item.lp_flags], Offset: item.lp_off, Length: item.lp_len, xmin: item.t_xmin, xmax: item.t_xmax, ctid: item.t_ctid, Flags: [...(item.raw_flags ?? []), ...(item.combined_flags ?? [])] })}<details><summary>All tuple fields & attributes</summary>${fields(item)}</details><details><summary>Tuple bytes · ${raw.length / 2} B</summary><pre>${esc(raw.match(/.{1,32}/g)?.map((s, i) => `${(item.lp_off + i * 16).toString(16).padStart(4, '0')}  ${s.match(/../g)?.join(' ')}`).join('\n') ?? '')}</pre></details>`);
+  setDetails(`<span class="pill">HEAP TUPLE</span><h3>(${h.block},${item.lp})</h3><div class="actions" id="tuple-actions"></div>${item.values?.length ? '<h4>Values</h4>' + fields(Object.fromEntries(item.values.map(v => [v.name, v.value ?? (v.state === 'absent' ? 'Not stored in this tuple' : `Raw (${v.type})`)]))) : ''}${fields({ State: ['Unused', 'Normal', 'HOT redirect', 'Dead'][item.lp_flags], Offset: item.lp_off, Length: item.lp_len, ...(item.lp_flags === 1 && item.t_hoff !== null ? { 'Header bytes': `${item.lp_off}–${item.lp_off + item.t_hoff - 1}`, 'Data bytes': item.lp_len > item.t_hoff ? `${item.lp_off + item.t_hoff}–${item.lp_off + item.lp_len - 1}` : 'none' } : {}), xmin: item.t_xmin, xmax: item.t_xmax, ctid: item.t_ctid, Flags: [...(item.raw_flags ?? []), ...(item.combined_flags ?? [])] })}<details><summary>All tuple fields & attributes</summary>${fields(item)}</details><details><summary>Tuple bytes · ${raw.length / 2} B</summary><pre>${esc(raw.match(/.{1,32}/g)?.map((s, i) => `${(item.lp_off + i * 16).toString(16).padStart(4, '0')}  ${s.match(/../g)?.join(' ')}`).join('\n') ?? '')}</pre></details>`);
   if (item.lp_flags === 2) button(`Follow redirect → ${item.lp_off}`, () => { const next = h.items.find(i => i.lp === item.lp_off); if (next) inspectTuple(next); }, $('tuple-actions'));
   if (item.t_ctid && item.t_ctid !== `(${h.block},${item.lp})`) button('Follow ctid →', () => run(async () => { const nextBlock = tidBlock(item.t_ctid!); if (nextBlock === null) return; block = nextBlock; await load(); const lp = Number(item.t_ctid!.split(',')[1]?.replace(')', '')); const next = heap?.items.find(i => i.lp === lp); if (next) inspectTuple(next); }), $('tuple-actions'));
 }

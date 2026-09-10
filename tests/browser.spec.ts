@@ -248,8 +248,11 @@ test('shared cells clip header stripes and select the clicked tuple fragment', a
   expect(await header.evaluate(el => el.style.width)).toBe('50%');
   await cell.locator('.heap-byte-region[data-lp="2"]').click();
   await expect(page.locator('#details h3')).toHaveText('(0,2)');
+  await expect(page.locator('.byte-cell.selected')).toHaveCount(0);
   await header.click();
   await expect(page.locator('#details h3')).toHaveText('(0,1)');
+  await expect(page.locator('.byte-cell.selected')).toHaveCount(0);
+  await expect(page.locator('#details')).toContainText('8072–8095');
   await expect.poll(() => page.evaluate(() => {
     const h = document.querySelector('.byte-cell[data-offset="8064"] .tuple-header')!.getBoundingClientRect();
     const outline = document.querySelector('.tuple-outline[data-lp="1"]')!.getBoundingClientRect();
