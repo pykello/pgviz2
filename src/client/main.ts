@@ -320,7 +320,7 @@ async function followTid(tid: string) {
 function renderHeap() {
   if (!heap) return; const h = heap;
   scene = undefined; $('canvas-controls').hidden = true; $('canvas').className = ''; $('breadcrumbs').textContent = `${h.relation.qualified} / main / block ${h.block}`;
-  $('legend').innerHTML = '<span><i class="dot header"></i>Header</span><span><i class="dot internal"></i>Pointers</span><span><i class="dot tuple"></i>Tuples (striped header)</span><span><i class="dot free"></i>Free</span>';
+  $('legend').innerHTML = '<span><i class="dot header"></i>Header</span><span><i class="dot internal"></i>Pointers</span><span><i class="dot tuple-header"></i>Tuple header</span><span><i class="dot tuple"></i>Data</span><span><i class="dot free"></i>Free</span>';
   $('canvas').innerHTML = `<div class="heap-wrap"><p>16 bytes per cell</p><div class="heap-strip"><span class="pointers" style="width:${h.header.lower / h.header.pagesize * 100}%"></span><span class="free" style="width:${(h.header.upper - h.header.lower) / h.header.pagesize * 100}%">${fmt(h.header.upper - h.header.lower)} bytes free</span><span class="used" style="width:${(h.header.pagesize - h.header.upper) / h.header.pagesize * 100}%">Tuple storage</span></div><div class="byte-grid" id="bytes"></div><details id="line-pointers"><summary>Line pointers (${h.items.length})</summary><div class="actions" id="tuple-buttons"></div></details></div>`;
   const regions = heapRegions(h);
   for (let offset = 0; offset < h.header.pagesize; offset += 16) {
@@ -359,7 +359,7 @@ function heapValueLabel(item: HeapItem) {
 function renderHeapOverlays() {
   const grid = document.getElementById('bytes');
   if (view !== 'heap' || !heap || !grid) return;
-  grid.querySelectorAll('.heap-value, .heap-pointer, .tuple-outline').forEach(label => label.remove());
+  grid.querySelectorAll('.heap-value, .heap-pointer, .heap-tuple-header, .tuple-outline').forEach(label => label.remove());
   const cells = [...grid.querySelectorAll<HTMLElement>('.byte-cell')];
   const origin = grid.getBoundingClientRect();
   const bounds = cells.map(cell => {
@@ -390,6 +390,20 @@ function renderHeapOverlays() {
       pointer.title = `Line pointer ${item.lp} · ${['unused', 'normal', 'redirect', 'dead'][item.lp_flags] ?? 'unknown'}`;
       pointer.setAttribute('aria-pressed', String(selectedHeap === item.lp));
       pointer.onclick = () => inspectTuple(item); position(pointer, rect); grid.append(pointer);
+    }
+    if (item.lp_flags === 1 && item.t_hoff !== null && item.t_hoff >= 23 && item.t_hoff <= item.lp_len) {
+      const headerRects = rectangles(item.lp_off, item.lp_off + 23);
+      const widest = headerRects.reduce((best, r) => r.right - r.left > (best?.right ?? 0) - (best?.left ?? 0) ? r : best, headerRects[0]);
+      const name = `Header (${heap.block},${item.lp})`;
+      const hover = (active: boolean) => grid.querySelectorAll<HTMLElement>('.heap-tuple-header').forEach(el => el.classList.toggle('hovered', active && el.dataset.lp === String(item.lp)));
+      for (const rect of headerRects) {
+        const header = document.createElement('button'); header.className = 'heap-tuple-header'; header.dataset.lp = String(item.lp);
+        header.setAttribute('aria-label', name); header.title = `${name} · bytes ${item.lp_off}–${item.lp_off + 22}`;
+        if (rect === widest) { const text = document.createElement('span'); text.textContent = name; header.append(text); }
+        header.onpointerenter = () => hover(true); header.onpointerleave = () => hover(false);
+        header.onfocus = () => hover(true); header.onblur = () => hover(false);
+        header.onclick = () => inspectTuple(item); position(header, rect); grid.append(header);
+      }
     }
     const text = heapValueLabel(item);
     if (item.lp_flags !== 1 || !text) continue;

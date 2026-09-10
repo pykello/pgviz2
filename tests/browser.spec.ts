@@ -231,7 +231,7 @@ test('redirect line pointers highlight the target and dead pointers clear it', a
   await expect(page.locator('#details')).toContainText('Dead');
 });
 
-test('shared cells clip header stripes and select the clicked tuple fragment', async ({ page }) => {
+test('shared cells clip header styling and select the clicked tuple fragment', async ({ page }) => {
   await page.route('**/api/heap?*', async route => {
     const response = await route.fetch(); const data = await response.json();
     // Tuple 2 ends halfway through a cell, exactly where tuple 1 begins.
@@ -249,7 +249,7 @@ test('shared cells clip header stripes and select the clicked tuple fragment', a
   await cell.locator('.heap-byte-region[data-lp="2"]').click();
   await expect(page.locator('#details h3')).toHaveText('(0,2)');
   await expect(page.locator('.byte-cell.selected')).toHaveCount(0);
-  await header.click();
+  await page.getByRole('button', { name: 'Header (0,1)', exact: true }).click();
   await expect(page.locator('#details h3')).toHaveText('(0,1)');
   await expect(page.locator('.byte-cell.selected')).toHaveCount(0);
   await expect(page.locator('#details')).toContainText('8072–8095');
@@ -258,4 +258,26 @@ test('shared cells clip header stripes and select the clicked tuple fragment', a
     const outline = document.querySelector('.tuple-outline[data-lp="1"]')!.getBoundingClientRect();
     return Math.abs(h.left - outline.left) < 1 && Math.abs(h.top - outline.top) < 1;
   })).toBe(true);
+});
+
+test('tuple headers have solid labels and hover across the entire header', async ({ page }) => {
+  await page.goto('/?view=heap&oid=2');
+  const headers = page.getByRole('button', { name: 'Header (0,4)', exact: true });
+  await expect(headers).toHaveCount(2);
+  await expect(headers.first()).toHaveCSS('background-color', 'rgb(245, 176, 39)');
+  await expect(page.locator('.heap-tuple-header[data-lp="4"] span')).toHaveText('Header (0,4)');
+  await headers.first().hover();
+  for (const header of await headers.all()) {
+    await expect(header).toHaveClass(/hovered/);
+    await expect(header).toHaveCSS('background-color', 'rgb(229, 160, 25)');
+  }
+  await expect(page.locator('.heap-tuple-header[data-lp="3"]').first()).not.toHaveClass(/hovered/);
+  await headers.last().hover();
+  await expect(headers.first()).toHaveClass(/hovered/);
+  await page.mouse.move(0, 0);
+  await expect(page.locator('.heap-tuple-header.hovered')).toHaveCount(0);
+  await headers.first().click();
+  await expect(page.locator('#details h3')).toHaveText('(0,4)');
+  await expect(page.locator('.tuple-outline')).toHaveCount(2);
+  await expect(page.locator('.byte-cell.selected')).toHaveCount(0);
 });
