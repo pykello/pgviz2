@@ -32,6 +32,12 @@ before(async () => {
 after(async () => { await wal?.close(); if (client) { await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await client.query(`DROP SCHEMA IF EXISTS "${playground!.schema}" CASCADE`); await client.end(); } await db?.close(); });
 test('live pageinspect integration', { skip: !dsn }, async t => {
   await t.test('status identifies server and extension', async () => { const s = await db!.request('status', {}); assert.ok(s.version_num >= 180000 && s.version_num < 190000); assert.ok(s.pageinspect); });
+  await t.test('relation URLs resolve an exact OID independently of the list', async () => {
+    const result = await db!.request('relations', { oid: oid('odd index') });
+    assert.equal(result.length, 1); assert.equal(result[0]!.name, 'odd index');
+    assert.deepEqual(await db!.request('relations', { oid: '4294967295' }), []);
+    await assert.rejects(db!.request('relations', { oid: 'invalid' }));
+  });
   await t.test('empty indexes have no root or invented nodes', async () => { const s = await db!.request('tree', { oid: oid('empty_idx') }); assert.equal(s.root, 0); assert.deepEqual(s.nodes, []); });
   await t.test('small root is a leaf', async () => { const s = await db!.request('tree', { oid: oid('small_idx') }); assert.equal(s.nodes.length, 1); assert.equal(s.nodes[0]!.leaf, true); assert.equal(s.nodes[0]!.items.length, 3); });
   await t.test('multi-page duplicate keys use real posting TIDs', async () => { const s = await db!.request('tree', { oid: oid('many_idx'), depth: '3' }); assert.ok(s.nodes.length > 1); assert.ok(s.nodes.some(n => n.items.some(i => i.heapTids.length > 1))); for (const n of s.nodes) for (const i of n.items) { if (i.highKey) assert.equal(i.child, null); if (n.leaf) assert.equal(i.child, null); } });

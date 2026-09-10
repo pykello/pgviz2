@@ -32,7 +32,7 @@ export class Demo implements Provider {
   async request<K extends Route>(route: K, args: Args): Promise<Api[K]> { return this.dispatch(route, args) as Api[K]; }
   private dispatch(route: Route, args: Args): Api[Route] {
     if (route === 'status') return { mode: 'demo', version: '18 · sample data', version_num: 180000, block_size: 8192, database: 'storage_lab', superuser: true, pageinspect: '1.13' };
-    if (route === 'relations') return [index, table].filter(r => `${r.schema}.${r.name}`.includes(args.q ?? ''));
+    if (route === 'relations') return [index, table].filter(r => `${r.schema}.${r.name}`.includes(args.q ?? '') && (args.oid === undefined || r.oid === integer(args.oid, 'Relation OID', 1)));
     const rel = args.oid === '1' ? index : args.oid === '2' ? table : null;
     if (!rel) throw new InputError('Unknown demo relation.');
     if (route === 'tree') {

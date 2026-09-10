@@ -109,3 +109,59 @@ test('home lists tables and indexes before loading a visualization', async ({ pa
   await page.locator('#home-search').fill('no_such_relation');
   await expect(page.locator('#home-relations button')).toHaveCount(0);
 });
+
+test('URLs restore subtrees, display options, pages and browser history', async ({ page }) => {
+  await page.goto('/?view=tree&oid=1&root=42&depth=1&keys=raw');
+  await expect(page.locator('.node[data-block]')).toHaveCount(1);
+  await expect(page.locator('.node[data-block="42"]')).toBeVisible();
+  await expect(page.locator('#depth')).toHaveValue('1');
+  await page.locator('#key-options > summary').click();
+  await expect(page.locator('#endian')).toHaveValue('raw');
+  await page.locator('#key-options > summary').click();
+  await page.reload();
+  await expect(page.locator('.node[data-block="42"]')).toBeVisible();
+  await page.getByRole('button', { name: '↑ Entire tree' }).click();
+  await expect(page).not.toHaveURL(/root=/);
+  await page.goBack();
+  await expect(page.locator('.node[data-block="42"]')).toBeVisible();
+  await page.goForward();
+  await expect(page.locator('.node[data-block="48"]')).toBeVisible();
+  await page.goto('/?view=heap&oid=2&block=18');
+  await expect(page.locator('#block')).toHaveValue('18');
+  await page.getByRole('button', { name: 'Next page', exact: true }).click();
+  await expect(page).toHaveURL(/block=19/);
+  await page.reload();
+  await expect(page.locator('#breadcrumbs')).toContainText('block 19');
+  await page.getByRole('button', { name: 'Page map', exact: true }).click();
+  await page.getByRole('button', { name: 'Next range', exact: true }).click();
+  await expect(page).toHaveURL(/view=map&oid=2&start=128/);
+  await page.reload();
+  await expect(page.locator('.page-cell')).toHaveCount(32);
+  await page.locator('.brand').click();
+  await expect(page.locator('#home')).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('.page-cell')).toHaveCount(32);
+});
+
+test('WAL URLs restore display settings without starting capture', async ({ page }) => {
+  await page.goto('/?view=wal&show=logical&filter=orders');
+  await expect(page.locator('#wal-mode')).toHaveValue('logical');
+  await expect(page.locator('#wal-filter')).toHaveValue('orders');
+  await expect(page.locator('#wal-stop')).toBeDisabled();
+  await page.selectOption('#wal-mode', 'physical');
+  await page.reload();
+  await expect(page.locator('#wal-mode')).toHaveValue('physical');
+  await expect(page.locator('#wal-filter')).toHaveValue('orders');
+  await expect(page.locator('#wal-stop')).toBeDisabled();
+});
+
+test('invalid and missing relations show a recoverable URL error', async ({ page }) => {
+  for (const search of ['?view=heap&oid=2&block=-1', '?view=tree&oid=9999', '?view=tree&oid=2']) {
+    await page.goto('/' + search);
+    await expect(page.locator('#error')).toBeVisible();
+    await expect(page.locator('#home')).toBeVisible();
+    await page.getByRole('button', { name: 'public.orders_customer_idx', exact: true }).click();
+    await expect(page.locator('.node[data-block]')).toHaveCount(4);
+    await expect(page.locator('#error')).toBeHidden();
+  }
+});

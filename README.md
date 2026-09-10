@@ -2,6 +2,18 @@
 
 PostgreSQL physical storage, in a browser. Gray B-tree frames, white key boxes, black arrows and the original heap palette, with a relation picker and an inspector that opens on selection. A TypeScript rewrite of [the original Racket pgviz](../pgviz), preserving its first-two-and-last btree summaries and on-demand page inspection.
 
+The initial screen lists heap tables and B-tree indexes. Select a relation to
+inspect it, or click **pgviz** to return to the searchable list.
+
+The URL preserves the relation, view, heap block, page-map range, B-tree
+subtree, depth, and key display mode. Refresh, bookmarks, and browser Back
+and Forward restore that location. For example, `/?view=heap&oid=123&block=4`
+opens block 4 of relation 123 in the connected database. Relation OIDs are
+specific to that database; links do not survive dropping and recreating a
+relation. WAL links preserve the display mode and filter, but captured
+records and active captures are not restored. Click **Start capture** to
+watch new activity after refreshing.
+
 ## Run
 
 Requires Node.js 22.12+ (24 recommended).

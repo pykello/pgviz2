@@ -1,6 +1,7 @@
 import { relatedChanges, type LogicalRecord, type PhysicalRecord, type WalBatch, type WalCapture, type WalStatus } from '../shared/wal';
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-interface Options { canvas: HTMLElement; controls: HTMLElement; details: (html: string) => void; snapshot: (data: unknown) => void }
+interface WalSettings { mode: 'physical' | 'logical'; filter: string }
+interface Options { settings: (settings: WalSettings) => void; canvas: HTMLElement; controls: HTMLElement; details: (html: string) => void; snapshot: (data: unknown) => void }
 export class WalView {
   private physical: PhysicalRecord[] = [];
   private logical: LogicalRecord[] = [];
@@ -17,7 +18,7 @@ export class WalView {
     const data = await r.json() as T & { error?: string };
     if (!r.ok) throw new Error(data.error ?? 'WAL request failed.'); return data;
   }
-  async activate() {
+  async activate(settings: WalSettings) {
     if (this.mounted) return;
     this.mounted = true; const generation = ++this.generation;
     this.options.canvas.className = 'wal-canvas';
@@ -26,7 +27,10 @@ export class WalView {
     this.get('wal-start').onclick = () => { void this.start(); };
     this.get('wal-stop').onclick = () => { void this.stop(); };
     this.get('wal-clear').onclick = () => { this.physical = []; this.logical = []; this.omitted = 0; this.render(); };
-    this.get('wal-filter').oninput = () => this.render(); this.get('wal-mode').onchange = () => this.render();
+    this.get<HTMLInputElement>('wal-filter').value = settings.filter;
+    this.get<HTMLSelectElement>('wal-mode').value = settings.mode;
+    const changeSettings = () => { this.options.settings({ mode: this.get<HTMLSelectElement>('wal-mode').value as WalSettings['mode'], filter: this.get<HTMLInputElement>('wal-filter').value }); this.render(); };
+    this.get('wal-filter').oninput = changeSettings; this.get('wal-mode').onchange = changeSettings;
     this.render();
     try { const status = await this.request<WalStatus>('status'); if (generation !== this.generation) return; this.get('wal-status').textContent = status.reason; this.get<HTMLButtonElement>('wal-start').disabled = !status.physical; }
     catch (e) { if (generation === this.generation) { this.message(e); this.get<HTMLButtonElement>('wal-start').disabled = true; } }

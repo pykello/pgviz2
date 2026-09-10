@@ -1,4 +1,5 @@
 import './style.css';
+import { readLocation, locationSearch, type View } from '../shared/location';
 import { WalView } from './wal-view';
 import { templates, commandSql, type Command, type CommandResult } from '../shared/commands';
 import type { Api, Args, BtreeNode, HeapItem, HeapPage, IndexItem, PageMap, RelationSummary, Route, Tree } from '../shared/types';
@@ -10,13 +11,14 @@ const display = (v: unknown): string => typeof v === 'object' ? JSON.stringify(v
 const fields = (v: object) => `<dl class="fields">${Object.entries(v).map(([k, value]) => `<div class="field"><dt>${esc(k)}</dt><dd>${esc(display(value))}</dd></div>`).join('')}</dl>`;
 const button = (label: string, action: () => void, parent: HTMLElement): void => { const b = document.createElement('button'); b.textContent = label; b.onclick = action; parent.append(b); };
 let relations: RelationSummary[] = [], current: RelationSummary | undefined;
-let view: 'home' | 'tree' | 'heap' | 'map' | 'wal' = 'home';
+let view: View = 'home';
+let walSettings = { mode: 'physical' as 'physical' | 'logical', filter: '' };
 let tree: Tree | undefined, heap: HeapPage | undefined, map: PageMap | undefined;
 let depth = 2, block = 0, mapStart = 0, focusRoot: number | undefined;
 let endian: 'auto' | 'raw' | 'little' | 'big' = 'auto', selected: number | undefined;
 let requestId = 0, detailId = 0, searchId = 0, filterTimer: ReturnType<typeof setTimeout>;
 let snapshot: unknown, baseline: Tree | undefined, changed = new Set<number>();
-const walView = new WalView({ canvas: $('canvas'), controls: $('view-controls'), details: setDetails, snapshot: data => { snapshot = data; } });
+const walView = new WalView({ canvas: $('canvas'), controls: $('view-controls'), details: setDetails, snapshot: data => { snapshot = data; }, settings: settings => { const replace = walSettings.mode === settings.mode; walSettings = settings; writeLocation(replace); } });
 async function api<K extends Route>(route: K, args: Record<string, string | number | undefined> = {}): Promise<Api[K]> {
   const params: Args = Object.fromEntries(Object.entries(args).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
   const response = await fetch(`/api/${route}?${new URLSearchParams(params)}`);
@@ -57,14 +59,14 @@ function chooseRelation(rel: RelationSummary) {
   $<HTMLDetailsElement>('relation-picker').open = false; renderRelations(); run(load);
 }
 function renderControls() {
-  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b => { b.classList.toggle('active', b.dataset.view === view); b.disabled = b.dataset.view === 'tree' ? current?.method !== 'btree' : b.dataset.view === 'heap' ? current?.method !== 'heap' : false; });
+  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b => { b.classList.toggle('active', b.dataset.view === view); b.disabled = b.dataset.view === 'tree' ? current?.method !== 'btree' : b.dataset.view === 'heap' ? current?.method !== 'heap' : b.dataset.view === 'map' ? !current : false; });
   if (view === 'wal') return;
   const controls = $('view-controls');
   if (view === 'tree') {
     controls.innerHTML = `<label>Levels <select id="depth">${[1, 2, 3, 4].map(d => `<option ${d === depth ? 'selected' : ''}>${d}</option>`).join('')}</select></label><details class="popover" id="key-options"><summary>Keys</summary><div class="menu"><label title="Readable values when the stored type is supported; otherwise raw bytes.">Keys <select id="endian"><option value="auto">Values</option><option value="raw">Raw bytes</option></select></label></div></details>`;
     $<HTMLSelectElement>('endian').value = endian;
     $('depth').onchange = () => { depth = Number($<HTMLSelectElement>('depth').value); run(load); };
-    $('endian').onchange = () => { endian = $<HTMLSelectElement>('endian').value as typeof endian; renderTree(); if (selected !== undefined) { const n = tree?.nodes.find(n => n.block === selected); if (n) inspectNode(n); } };
+    $('endian').onchange = () => { endian = $<HTMLSelectElement>('endian').value as typeof endian; writeLocation(); renderTree(); if (selected !== undefined) { const n = tree?.nodes.find(n => n.block === selected); if (n) inspectNode(n); } };
   } else {
     controls.innerHTML = `<button id="prev" aria-label="Previous ${view === 'heap' ? 'page' : 'range'}">←</button><label>${view === 'heap' ? 'Block' : 'From block'} <input id="block" type="number" min="0" step="1" value="${view === 'heap' ? block : mapStart}"></label><button id="go">Go</button><button id="next" aria-label="Next ${view === 'heap' ? 'page' : 'range'}">→</button>`;
     $('go').onclick = () => { const v = Number($<HTMLInputElement>('block').value); if (!Number.isSafeInteger(v) || v < 0) { fail(new Error('Enter a non-negative block number.')); return; } if (view === 'heap') block = v; else mapStart = v; run(load); };
@@ -77,16 +79,45 @@ function renderControls() {
   }
 }
 function metrics(values: [string, string, string?][]) { $('metrics').innerHTML = values.map(([label, value, unit]) => `<div class="metric"><small>${esc(label)}</small><strong>${esc(value)}</strong><em>${esc(unit ?? '')}</em></div>`).join(''); }
-async function load() {
+function writeLocation(replace = false) {
+  const search = locationSearch({ view, oid: current?.oid, block, start: mapStart,
+    root: focusRoot, depth, keys: endian === 'raw' ? 'raw' : 'auto',
+    walMode: walSettings.mode, filter: view === 'home' ? $<HTMLInputElement>('home-search').value : walSettings.filter });
+  if (location.search !== search) history[replace ? 'replaceState' : 'pushState'](null, '', '/' + search);
+}
+async function restoreLocation() {
+  const id = ++requestId; searchId++; clearTimeout(filterTimer); stopRepeating(); walView.deactivate();
+  try {
+    const state = readLocation(location.search);
+    const rel = state.oid ? (await api('relations', { oid: state.oid }))[0] : undefined;
+    if (id !== requestId) return;
+    if (state.oid && !rel) throw new Error('The relation in this URL no longer exists or is not inspectable.');
+    if (state.view === 'tree' && rel?.method !== 'btree') throw new Error('This URL requires a B-tree index.');
+    if (state.view === 'heap' && rel?.method !== 'heap') throw new Error('This URL requires a heap table.');
+    current = rel; view = state.view; block = state.block; mapStart = state.start;
+    focusRoot = state.root; depth = state.depth; endian = state.keys; baseline = undefined;
+    walSettings = { mode: state.walMode, filter: state.filter };
+    $<HTMLInputElement>('home-search').value = view === 'home' ? state.filter : '';
+    renderRelations(); writeLocation(true); await load(false);
+  } catch (e) {
+    if (id !== requestId) return;
+    current = undefined; view = 'home'; await load(false); fail(e);
+  }
+}
+window.addEventListener('popstate', () => run(restoreLocation));
+async function load(updateLocation = true) {
+  if (updateLocation) writeLocation();
+  searchId++; clearTimeout(filterTimer);
   document.querySelector('main')!.classList.toggle('home', view === 'home');
   $('home').hidden = view !== 'home'; $('workarea').hidden = view === 'home';
+  $('title').textContent = current ? `${current.schema}.${current.name}` : 'Choose relation';
   if (view === 'home') {
-    requestId++; walView.deactivate(); emptyInspector(); snapshot = undefined;
+    const id = ++requestId; walView.deactivate(); emptyInspector(); snapshot = undefined;
     $('error').hidden = true; $('view-controls').replaceChildren();
-    relations = await api('relations', { q: $<HTMLInputElement>('home-search').value });
-    renderRelations(); return;
+    const result = await api('relations', { q: $<HTMLInputElement>('home-search').value });
+    if (id !== requestId) return; relations = result; renderRelations(); return;
   }
-  if (view === 'wal') { requestId++; $('error').hidden = true; renderControls(); emptyInspector(); scene = undefined; $('canvas-controls').hidden = true; $('breadcrumbs').textContent = 'Physical WAL · current cluster timeline'; $('legend').textContent = ''; $('metrics').replaceChildren(); $('footnote').textContent = 'Physical WAL is cluster-wide. Logical changes belong to the connected database and appear after commit.'; await walView.activate(); return; }
+  if (view === 'wal') { requestId++; $('error').hidden = true; renderControls(); emptyInspector(); scene = undefined; $('canvas-controls').hidden = true; $('breadcrumbs').textContent = 'Physical WAL · current cluster timeline'; $('legend').textContent = ''; $('metrics').replaceChildren(); $('footnote').textContent = 'Physical WAL is cluster-wide. Logical changes belong to the connected database and appear after commit.'; await walView.activate(walSettings); return; }
   walView.deactivate();
   if (!current) return;
   const id = ++requestId; detailId++; $('error').hidden = true; $('canvas').classList.add('loading');
@@ -337,7 +368,7 @@ $('pin-baseline').onclick = () => { if (!tree || view !== 'tree') return; baseli
 document.addEventListener('click', e => { for (const menu of document.querySelectorAll<HTMLDetailsElement>('.popover[open]')) if (!menu.contains(e.target as Node)) menu.open = false; });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.querySelectorAll<HTMLDetailsElement>('.popover[open]').forEach(menu => menu.open = false); emptyInspector(); } });
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b => { b.onclick = () => { stopRepeating(); view = b.dataset.view as typeof view; run(load); }; });
-function searchRelations(input: HTMLInputElement) { clearTimeout(filterTimer); const id = ++searchId; filterTimer = setTimeout(() => run(async () => { const result = await api('relations', { q: input.value }); if (id === searchId) { relations = result; renderRelations(); } }), 180); }
+function searchRelations(input: HTMLInputElement) { clearTimeout(filterTimer); const id = ++searchId; filterTimer = setTimeout(() => run(async () => { const result = await api('relations', { q: input.value }); if (id === searchId) { relations = result; renderRelations(); if (view === 'home') writeLocation(true); } }), 180); }
 $('search').oninput = () => searchRelations($<HTMLInputElement>('search'));
 $('home-search').oninput = () => searchRelations($<HTMLInputElement>('home-search'));
 $('export').onclick = () => {
@@ -408,5 +439,5 @@ run(async () => {
   const [status, catalog] = await Promise.all([api('status'), api('relations')]); relations = catalog;
   liveCommands = status.mode === 'live'; renderCommands(); $('database').textContent = status.database; $('connection').textContent = `PostgreSQL ${status.version}`; $('mode').textContent = status.mode === 'demo' ? 'Demo' : 'Live';
   if (status.mode !== 'demo' && (!status.pageinspect || !status.superuser)) { $('notice').hidden = false; $('notice').textContent = !status.pageinspect ? 'pageinspect is not installed. Run CREATE EXTENSION pageinspect; in this database as a superuser.' : 'Physical page inspection requires a PostgreSQL superuser connection.'; }
-  await load();
+  await restoreLocation();
 });

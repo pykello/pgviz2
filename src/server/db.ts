@@ -86,7 +86,8 @@ class Reader {
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_am a ON a.oid=c.relam
       WHERE c.relkind IN ('r','m','i') AND a.amname IN ('heap','btree')
       AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%'
-      AND (n.nspname || '.' || c.relname) ILIKE $1 ORDER BY n.nspname,c.relname LIMIT 500`, ['%' + (args.q ?? '').slice(0, 100) + '%']);
+      AND (n.nspname || '.' || c.relname) ILIKE $1 AND ($2::oid IS NULL OR c.oid=$2::oid)
+      ORDER BY n.nspname,c.relname LIMIT 500`, ['%' + (args.q ?? '').slice(0, 100) + '%', args.oid === undefined ? null : integer(args.oid, 'Relation OID', 1)]);
     const rel = await this.relation(args.oid);
     if ((route === 'tree' || route === 'node') && rel.method !== 'btree') throw new InputError('Choose a B-tree index.');
     if (route === 'node') return this.node(rel, this.block(rel, args.block, 1));
