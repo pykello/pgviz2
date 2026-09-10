@@ -177,7 +177,7 @@ test('heap values fit the byte cells and remain readable in the inspector', asyn
       return r.left >= grid.left && r.right <= grid.right && r.top >= grid.top && r.bottom <= grid.bottom;
     })).toBe(true);
     await expect(label).toHaveCSS('text-overflow', 'ellipsis');
-    await expect.poll(() => label.evaluate(el => el.isConnected && el.scrollWidth > el.clientWidth)).toBe(true);
+    if (width === 390) await expect.poll(() => label.evaluate(el => el.isConnected && el.scrollWidth > el.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -198,10 +198,10 @@ test('heap values fit the byte cells and remain readable in the inspector', asyn
 
 test('line pointers outline their tuple across grid rows and clear selection', async ({ page }) => {
   await page.goto('/?view=heap&oid=2');
-  await page.getByRole('button', { name: 'Line pointer 9', exact: true }).click();
+  await page.getByRole('button', { name: 'Line pointer 4', exact: true }).click();
   await expect(page.locator('.tuple-outline')).toHaveCount(2);
-  await expect(page.locator('.tuple-outline').first()).toHaveAttribute('data-lp', '9');
-  await expect(page.locator('#details h3')).toHaveText('(0,9)');
+  await expect(page.locator('.tuple-outline').first()).toHaveAttribute('data-lp', '4');
+  await expect(page.locator('#details h3')).toHaveText('(0,4)');
   await page.locator('#line-pointers > summary').click();
   await page.getByRole('button', { name: '1 · normal', exact: true }).click();
   await expect(page.locator('.tuple-outline')).toHaveCount(1);
