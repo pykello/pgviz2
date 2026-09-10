@@ -10,7 +10,7 @@ const display = (v: unknown): string => typeof v === 'object' ? JSON.stringify(v
 const fields = (v: object) => `<dl class="fields">${Object.entries(v).map(([k, value]) => `<div class="field"><dt>${esc(k)}</dt><dd>${esc(display(value))}</dd></div>`).join('')}</dl>`;
 const button = (label: string, action: () => void, parent: HTMLElement): void => { const b = document.createElement('button'); b.textContent = label; b.onclick = action; parent.append(b); };
 let relations: RelationSummary[] = [], current: RelationSummary | undefined;
-let view: 'tree' | 'heap' | 'map' | 'wal' = 'tree';
+let view: 'home' | 'tree' | 'heap' | 'map' | 'wal' = 'home';
 let tree: Tree | undefined, heap: HeapPage | undefined, map: PageMap | undefined;
 let depth = 2, block = 0, mapStart = 0, focusRoot: number | undefined;
 let endian: 'auto' | 'raw' | 'little' | 'big' = 'auto', selected: number | undefined;
@@ -29,15 +29,32 @@ function run(action: () => Promise<void>) { void action().catch(fail); }
 function emptyInspector() { selected = undefined; detailId++; $('details').replaceChildren(); $('inspector').hidden = true; $('workarea').classList.remove('has-selection'); document.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected')); }
 function setDetails(html: string) { $('inspector').hidden = false; $('workarea').classList.add('has-selection'); $('details').innerHTML = html; }
 function renderRelations() {
+  if (view === 'home') {
+    $('home-relations').replaceChildren();
+    for (const method of ['heap', 'btree'] as const) {
+      const section = document.createElement('section');
+      section.innerHTML = `<h2>${method === 'heap' ? 'Heap tables' : 'B-tree indexes'}</h2>`;
+      for (const rel of relations.filter(r => r.method === method)) {
+        button(`${rel.schema}.${rel.name}`, () => chooseRelation(rel), section);
+      }
+      if (!section.querySelector('button')) section.insertAdjacentHTML('beforeend', '<p class="hint">No matching relations.</p>');
+      $('home-relations').append(section);
+    }
+  }
   $('relation-count').textContent = String(relations.length);
   $('relations').replaceChildren();
   for (const rel of relations) {
     const b = document.createElement('button'); b.className = 'relation' + (rel.oid === current?.oid ? ' active' : '');
     b.innerHTML = `<span class="icon">${rel.method === 'btree' ? '⑂' : '▤'}</span><span>${esc(rel.name)}<small>${esc(rel.schema)} · ${rel.method === 'btree' ? 'B-tree index' : 'heap table'}</small></span>`;
-    b.onclick = () => { stopRepeating(); current = rel; view = rel.method === 'btree' ? 'tree' : 'heap'; focusRoot = undefined; block = 0; mapStart = 0; baseline = undefined; $<HTMLDetailsElement>('relation-picker').open = false; renderRelations(); run(load); };
+    b.onclick = () => chooseRelation(rel);
     $('relations').append(b);
   }
   if (!relations.length) $('relations').innerHTML = '<p class="hint">No matching relations. Try a schema or relation name.</p>';
+}
+function chooseRelation(rel: RelationSummary) {
+  stopRepeating(); current = rel; view = rel.method === 'btree' ? 'tree' : 'heap';
+  focusRoot = undefined; block = 0; mapStart = 0; baseline = undefined;
+  $<HTMLDetailsElement>('relation-picker').open = false; renderRelations(); run(load);
 }
 function renderControls() {
   document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b => { b.classList.toggle('active', b.dataset.view === view); b.disabled = b.dataset.view === 'tree' ? current?.method !== 'btree' : b.dataset.view === 'heap' ? current?.method !== 'heap' : false; });
@@ -61,6 +78,14 @@ function renderControls() {
 }
 function metrics(values: [string, string, string?][]) { $('metrics').innerHTML = values.map(([label, value, unit]) => `<div class="metric"><small>${esc(label)}</small><strong>${esc(value)}</strong><em>${esc(unit ?? '')}</em></div>`).join(''); }
 async function load() {
+  document.querySelector('main')!.classList.toggle('home', view === 'home');
+  $('home').hidden = view !== 'home'; $('workarea').hidden = view === 'home';
+  if (view === 'home') {
+    requestId++; walView.deactivate(); emptyInspector(); snapshot = undefined;
+    $('error').hidden = true; $('view-controls').replaceChildren();
+    relations = await api('relations', { q: $<HTMLInputElement>('home-search').value });
+    renderRelations(); return;
+  }
   if (view === 'wal') { requestId++; $('error').hidden = true; renderControls(); emptyInspector(); scene = undefined; $('canvas-controls').hidden = true; $('breadcrumbs').textContent = 'Physical WAL · current cluster timeline'; $('legend').textContent = ''; $('metrics').replaceChildren(); $('footnote').textContent = 'Physical WAL is cluster-wide. Logical changes belong to the connected database and appear after commit.'; await walView.activate(); return; }
   walView.deactivate();
   if (!current) return;
@@ -312,7 +337,9 @@ $('pin-baseline').onclick = () => { if (!tree || view !== 'tree') return; baseli
 document.addEventListener('click', e => { for (const menu of document.querySelectorAll<HTMLDetailsElement>('.popover[open]')) if (!menu.contains(e.target as Node)) menu.open = false; });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { document.querySelectorAll<HTMLDetailsElement>('.popover[open]').forEach(menu => menu.open = false); emptyInspector(); } });
 document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(b => { b.onclick = () => { stopRepeating(); view = b.dataset.view as typeof view; run(load); }; });
-$('search').oninput = () => { clearTimeout(filterTimer); const id = ++searchId; filterTimer = setTimeout(() => run(async () => { const result = await api('relations', { q: $<HTMLInputElement>('search').value }); if (id === searchId) { relations = result; renderRelations(); } }), 180); };
+function searchRelations(input: HTMLInputElement) { clearTimeout(filterTimer); const id = ++searchId; filterTimer = setTimeout(() => run(async () => { const result = await api('relations', { q: input.value }); if (id === searchId) { relations = result; renderRelations(); } }), 180); }
+$('search').oninput = () => searchRelations($<HTMLInputElement>('search'));
+$('home-search').oninput = () => searchRelations($<HTMLInputElement>('home-search'));
 $('export').onclick = () => {
   if (!snapshot) { fail(new Error('Load a visualization before exporting.')); return; }
   const blob = new Blob([JSON.stringify({ format: 'pgviz/1', view, exportedAt: new Date().toISOString(), data: snapshot }, null, 2)], { type: 'application/json' });
@@ -381,6 +408,5 @@ run(async () => {
   const [status, catalog] = await Promise.all([api('status'), api('relations')]); relations = catalog;
   liveCommands = status.mode === 'live'; renderCommands(); $('database').textContent = status.database; $('connection').textContent = `PostgreSQL ${status.version}`; $('mode').textContent = status.mode === 'demo' ? 'Demo' : 'Live';
   if (status.mode !== 'demo' && (!status.pageinspect || !status.superuser)) { $('notice').hidden = false; $('notice').textContent = !status.pageinspect ? 'pageinspect is not installed. Run CREATE EXTENSION pageinspect; in this database as a superuser.' : 'Physical page inspection requires a PostgreSQL superuser connection.'; }
-  current = relations.find(r => r.method === 'btree') ?? relations[0]; view = current?.method === 'btree' ? 'tree' : 'heap'; renderRelations(); emptyInspector();
-  if (current) await load(); else { $('canvas').innerHTML = '<div class="blank">No user tables or B-tree indexes found.<br>Create a table in this database, then reload the browser.</div>'; }
+  await load();
 });

@@ -21,6 +21,7 @@ test('browser works through a TCP tunnel using a different local port', async ({
   try {
     const origin = `http://127.0.0.1:${address.port}`;
     await page.goto(origin);
+    await page.getByRole('button', { name: 'public.orders_customer_idx', exact: true }).click();
     await expect(page.locator('.node[data-block]')).toHaveCount(4);
     const response = await page.request.get(`${origin}/api/status`, { headers: { Origin: origin } });
     expect(response.status()).toBe(200);
@@ -34,6 +35,7 @@ test('browser works through a TCP tunnel using a different local port', async ({
 test('compact tree, drilldown, heap, map, and export', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/');
+  await page.getByRole('button', { name: 'public.orders_customer_idx', exact: true }).click();
   await expect(page.locator('#mode')).toHaveText('Demo');
   await expect(page.locator('.node[data-block]')).toHaveCount(4);
   await page.locator('#key-options > summary').click();
@@ -66,7 +68,8 @@ test('compact tree, drilldown, heap, map, and export', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 test('zoom, keyboard selection, filters and mobile layout', async ({ page }) => {
-  await page.goto('/'); await expect(page.locator('.node[data-block]')).toHaveCount(4);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'public.orders_customer_idx', exact: true }).click(); await expect(page.locator('.node[data-block]')).toHaveCount(4);
   await expect(page.locator('#inspector')).toBeHidden();
   await page.getByRole('button', { name: 'Expand 5 branches of block 48', exact: true }).click();
   await expect(page.locator('.node[data-block]')).toHaveCount(9);
@@ -91,4 +94,18 @@ test('local API denies foreign origins and invalid inputs', async ({ request }) 
   expect((await request.get('/api/status', { headers: { Host: 'localhost.evil.example:8000' } })).status()).toBe(403);
   expect((await request.post('/api/status')).status()).toBe(405);
   expect((await request.get('/api/tree?oid=1&depth=9')).status()).toBe(400);
+});
+
+test('home lists tables and indexes before loading a visualization', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#home')).toBeVisible();
+  await expect(page.locator('#workarea')).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Heap tables' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'B-tree indexes' })).toBeVisible();
+  await page.getByRole('button', { name: 'public.orders', exact: true }).click();
+  await expect(page.locator('.byte-cell')).toHaveCount(512);
+  await page.locator('.brand').click();
+  await expect(page.locator('#home')).toBeVisible();
+  await page.locator('#home-search').fill('no_such_relation');
+  await expect(page.locator('#home-relations button')).toHaveCount(0);
 });
