@@ -398,7 +398,7 @@ function renderHeapOverlays() {
       const hover = (active: boolean) => grid.querySelectorAll<HTMLElement>('.heap-tuple-header').forEach(el => el.classList.toggle('hovered', active && el.dataset.lp === String(item.lp)));
       for (const rect of headerRects) {
         const header = document.createElement('button'); header.className = 'heap-tuple-header'; header.dataset.lp = String(item.lp);
-        header.setAttribute('aria-label', name); header.title = `${name} · bytes ${item.lp_off}–${item.lp_off + 22}`;
+        header.setAttribute('aria-label', name); header.title = `${name} · bytes ${item.lp_off}–${item.lp_off + 22}${item.values?.length ? '\n' + item.values.map(v => `${v.name}: ${v.value ?? (v.state === 'absent' ? 'not stored' : 'raw')}`).join('\n') : ''}`;
         if (rect === widest) { const text = document.createElement('span'); text.textContent = name; header.append(text); }
         header.onpointerenter = () => hover(true); header.onpointerleave = () => hover(false);
         header.onfocus = () => hover(true); header.onblur = () => hover(false);

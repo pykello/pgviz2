@@ -264,6 +264,9 @@ test('tuple headers have solid labels and hover across the entire header', async
   await page.goto('/?view=heap&oid=2');
   const headers = page.getByRole('button', { name: 'Header (0,4)', exact: true });
   await expect(headers).toHaveCount(2);
+  for (const header of await headers.all()) {
+    await expect(header).toHaveAttribute('title', 'Header (0,4) · bytes 7712–7734\nid: 4\ncustomer: "Customer 4 · example order"\nnote: NULL');
+  }
   await expect(headers.first()).toHaveCSS('background-color', 'rgb(245, 176, 39)');
   await expect(page.locator('.heap-tuple-header[data-lp="4"] span')).toHaveText('Header (0,4)');
   await headers.first().hover();
