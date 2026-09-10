@@ -176,11 +176,20 @@ test('heap values fit the byte cells and remain readable in the inspector', asyn
       const r = el.getBoundingClientRect(), grid = el.parentElement!.getBoundingClientRect();
       return r.left >= grid.left && r.right <= grid.right && r.top >= grid.top && r.bottom <= grid.bottom;
     })).toBe(true);
-    expect(await label.evaluate(el => getComputedStyle(el).textOverflow)).toBe('ellipsis');
-    expect(await label.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
+    await expect(label).toHaveCSS('text-overflow', 'ellipsis');
+    await expect.poll(() => label.evaluate(el => el.isConnected && el.scrollWidth > el.clientWidth)).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
+  // Labels pass clicks through to byte cells. Wait for ResizeObserver to
+  // align the label with its tuple before reading raw mouse coordinates.
+  await expect.poll(() => page.evaluate(() => {
+    const el = document.querySelector('.heap-value[data-lp="1"]');
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    const target = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return target?.classList.contains('byte-cell') && target.getAttribute('title')?.startsWith('Tuple 1 ');
+  })).toBe(true);
   const box = await label.boundingBox();
   await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await expect(page.locator('#details')).toContainText('Customer 1 · example order');
