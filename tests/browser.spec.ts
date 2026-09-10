@@ -165,3 +165,24 @@ test('invalid and missing relations show a recoverable URL error', async ({ page
     await expect(page.locator('#error')).toBeHidden();
   }
 });
+
+test('heap values fit the byte cells and remain readable in the inspector', async ({ page }) => {
+  await page.goto('/?view=heap&oid=2');
+  const label = page.locator('.heap-value[data-lp="1"]');
+  await expect(label).toContainText('Customer 1');
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect.poll(() => label.evaluate(el => {
+      const r = el.getBoundingClientRect(), grid = el.parentElement!.getBoundingClientRect();
+      return r.left >= grid.left && r.right <= grid.right && r.top >= grid.top && r.bottom <= grid.bottom;
+    })).toBe(true);
+    expect(await label.evaluate(el => getComputedStyle(el).textOverflow)).toBe('ellipsis');
+    expect(await label.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const box = await label.boundingBox();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(page.locator('#details')).toContainText('Customer 1 · example order');
+  await expect(page.locator('#details')).toContainText('NULL');
+});

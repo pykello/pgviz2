@@ -14,6 +14,12 @@ relation. WAL links preserve the display mode and filter, but captured
 records and active captures are not restored. Click **Start capture** to
 watch new activity after refreshing.
 
+Heap data cells show decoded tuple values where supported, clipped with an
+ellipsis to fit the available space. Hover a tuple cell or select it for
+full values and column names. Labels use the captured page bytes, including
+older tuple versions. Unknown types and compressed/external TOAST values
+remain raw; columns absent from an older tuple are marked as not stored.
+
 ## Run
 
 Requires Node.js 22.12+ (24 recommended).

@@ -1,4 +1,4 @@
-import { btreeByteOrder, labelNode, type IndexColumn, type KeyContext } from './keys';
+import { btreeByteOrder, labelNode, decodeHeapAttribute, type IndexColumn, type KeyContext } from './keys';
 import pg, { type PoolClient, type QueryResultRow } from 'pg';
 import type { Api, Args, BtreeMeta, BtreeStats, HeapItem, PageHeader, Provider, RawIndexItem, Relation, Route, MapPage } from '../shared/types';
 import { InputError, integer, normalizeNode, sample } from '../shared/tree';
@@ -119,7 +119,23 @@ class Reader {
         FROM ${this.fn('heap_page_item_attrs')}($1,$2::regclass,false) h
         LEFT JOIN LATERAL ${this.fn('heap_tuple_infomask_flags')}(h.t_infomask,h.t_infomask2) f ON h.t_infomask IS NOT NULL
         ORDER BY h.lp`, [raw!.get_raw_page, rel.qualified]);
-      const items: HeapItem[] = rawItems.map(item => ({ ...item, t_attrs: item.t_attrs?.map(attr => attr === null ? null : Buffer.from(attr).toString('hex')) ?? null }));
+      const columns = await this.rows<IndexColumn & { dropped: boolean }>(`SELECT a.attname AS name,
+        format_type(a.atttypid,a.atttypmod) AS type,coalesce(nullif(t.typbasetype,0),a.atttypid)::int AS oid,
+        a.attlen AS length,a.attalign AS alignment,a.attisdropped AS dropped
+        FROM pg_attribute a LEFT JOIN pg_type t ON t.oid=a.atttypid
+        WHERE a.attrelid=$1 AND a.attnum>0 ORDER BY a.attnum`, [rel.oid]);
+      const [settings] = await this.rows<{ encoding: string }>("SELECT current_setting('server_encoding') AS encoding");
+      const image = raw!.get_raw_page, pageVersion = header!.pagesize | 4;
+      const little = image.readUInt16LE(18) === pageVersion ? true : image.readUInt16BE(18) === pageVersion ? false : undefined;
+      const items: HeapItem[] = rawItems.map(item => ({ ...item,
+        t_attrs: item.t_attrs?.map(attr => attr === null ? null : Buffer.from(attr).toString('hex')) ?? null,
+        values: item.lp_flags !== 1 || !item.t_attrs ? [] : columns.flatMap((column, i) => {
+          if (column.dropped) return [];
+          const attr = item.t_attrs![i];
+          const absent = i >= ((item.t_infomask2 ?? 0) & 0x7ff);
+          const value = absent ? undefined : attr === null ? 'NULL' : attr === undefined || little === undefined ? undefined : decodeHeapAttribute(Buffer.from(attr), column, little, settings!.encoding);
+          return [{ name: column.name, type: column.type, value, state: absent ? 'absent' as const : value === undefined ? 'raw' as const : 'decoded' as const }];
+        }) }));
       return { relation: rel, block, header: header!, items, raw: raw!.get_raw_page.toString('hex') };
     }
     if (route === 'map') {

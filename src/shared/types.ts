@@ -9,7 +9,8 @@ export interface BtreeNode { block: number; level: number; leaf: boolean; stats:
 export interface BtreeMeta extends Fields { root: number; level: number; fastroot: number; fastlevel: number }
 export interface Tree { relation: Relation; meta: BtreeMeta; root: number; nodes: BtreeNode[]; columns: { name: string; type: string }[]; capturedAt: string; consistency: string }
 export interface PageHeader extends Fields { lower: number; upper: number; special: number; pagesize: number; lsn: string; checksum: number; flags: number }
-export interface HeapItem { lp: number; lp_off: number; lp_flags: number; lp_len: number; t_xmin: string | null; t_xmax: string | null; t_ctid: string | null; t_hoff: number | null; t_infomask: number | null; t_infomask2: number | null; t_bits: string | null; t_attrs: (string | null)[] | null; raw_flags?: string[]; combined_flags?: string[] }
+export interface HeapValue { name: string; type: string; value?: string; state: 'decoded' | 'raw' | 'absent' }
+export interface HeapItem { values?: HeapValue[]; lp: number; lp_off: number; lp_flags: number; lp_len: number; t_xmin: string | null; t_xmax: string | null; t_ctid: string | null; t_hoff: number | null; t_infomask: number | null; t_infomask2: number | null; t_bits: string | null; t_attrs: (string | null)[] | null; raw_flags?: string[]; combined_flags?: string[] }
 export interface HeapPage { relation: Relation; block: number; header: PageHeader; items: HeapItem[]; raw: string }
 export interface MapPage { block: number; free: number; size: number; kind: string; items?: number; dead?: number }
 export interface PageMap { relation: Relation; start: number; pages: MapPage[] }

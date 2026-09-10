@@ -15,3 +15,17 @@ for (const little of [true, false]) test(`decode actual tuple header and signed 
   assert.equal(decodeIndexKey(entry, Buffer.alloc(3), context), undefined);
   assert.equal(decodeIndexKey(entry, page, { ...context, columns: [{ ...context.columns[0]!, oid: 99999 }] }), undefined);
 });
+
+test('heap attributes decode both byte orders and reject external or malformed data', async () => {
+  const { decodeHeapAttribute } = await import('../src/server/keys');
+  const column = { name: 'v', type: 'bigint', oid: 20, length: 8, alignment: 'd' as const };
+  for (const little of [true, false]) {
+    const bytes = Buffer.alloc(8);
+    if (little) bytes.writeBigInt64LE(9223372036854775807n); else bytes.writeBigInt64BE(9223372036854775807n);
+    assert.equal(decodeHeapAttribute(bytes, column, little, 'UTF8'), '9223372036854775807');
+    assert.equal(decodeHeapAttribute(bytes.subarray(1), column, little, 'UTF8'), undefined);
+    const text = { ...column, oid: 25, length: -1 };
+    assert.equal(decodeHeapAttribute(Buffer.from([little ? 7 : 0x83, 104, 105]), text, little, 'UTF8'), '"hi"');
+    assert.equal(decodeHeapAttribute(Buffer.from([little ? 1 : 0x80, 18, 0, 0]), text, little, 'UTF8'), undefined);
+  }
+});

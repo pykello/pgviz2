@@ -23,7 +23,7 @@ function heap(block: number): HeapPage {
   const items: HeapPage['items'] = Array.from({ length: 24 }, (_, i) => {
     const offset = 8192 - (i + 1) * 120;
     raw.fill(i + 32, offset, offset + 112);
-    return { lp: i + 1, lp_off: offset, lp_len: 112, lp_flags: 1, t_xmin: '741', t_xmax: i === 3 ? '752' : '0', t_ctid: `(${block},${i === 3 ? 20 : i + 1})`, t_hoff: 24, t_infomask: 2306, t_infomask2: i === 3 ? 16387 : 3, t_bits: null, t_attrs: ['01000000', '637573746f6d6572', null], raw_flags: i === 3 ? ['HEAP_HOT_UPDATED', 'HEAP_XMIN_COMMITTED'] : ['HEAP_XMIN_COMMITTED', 'HEAP_XMAX_INVALID'], combined_flags: [] };
+    return { lp: i + 1, lp_off: offset, lp_len: 112, lp_flags: 1, t_xmin: '741', t_xmax: i === 3 ? '752' : '0', t_ctid: `(${block},${i === 3 ? 20 : i + 1})`, t_hoff: 24, t_infomask: 2306, t_infomask2: i === 3 ? 16387 : 3, t_bits: null, t_attrs: ['01000000', '637573746f6d6572', null], values: [{ name: 'id', type: 'integer', value: String(i + 1), state: 'decoded' }, { name: 'customer', type: 'text', value: JSON.stringify('Customer ' + (i + 1) + ' · example order'), state: 'decoded' }, { name: 'note', type: 'text', value: 'NULL', state: 'decoded' }], raw_flags: i === 3 ? ['HEAP_HOT_UPDATED', 'HEAP_XMIN_COMMITTED'] : ['HEAP_XMIN_COMMITTED', 'HEAP_XMAX_INVALID'], combined_flags: [] };
   });
   return { relation: table, block, raw: raw.toString('hex'), header: { lower: 120, upper: 5312, special: 8192, pagesize: 8192, lsn: '0/16B4C88', checksum: 0, flags: 0 }, items };
 }

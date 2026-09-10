@@ -44,6 +44,29 @@ test('live pageinspect integration', { skip: !dsn }, async t => {
   await t.test('text and composite keys stay inspectable', async () => { for (const name of ['text_idx', 'composite_idx']) { const s = await db!.request('tree', { oid: oid(name) }); assert.ok(s.nodes.length > 0); } });
   await t.test('quoted identifiers and schemas resolve by OID', async () => { const s = await db!.request('tree', { oid: oid('odd index') }); assert.equal(s.nodes.length, 1); });
   await t.test('heap captures bytes, nulls, and PostgreSQL decoded flags', async () => { const h = await db!.request('heap', { oid: oid('small'), block: '0' }); assert.equal(h.raw.length, h.header.pagesize * 2); assert.equal(h.items.length, 3); assert.ok(h.items[0]!.raw_flags); assert.equal(h.items[1]!.t_attrs![1], null); });
+  await t.test('heap labels preserve physical values, dropped columns and absent defaults', async () => {
+    await client!.query(`CREATE TABLE "${schema}".heap_values (id int, gone text, big bigint, label text, amount numeric, flag boolean, u uuid, d date, external text, compressed text, optional text) WITH (autovacuum_enabled=false);
+      ALTER TABLE "${schema}".heap_values ALTER COLUMN external SET STORAGE EXTERNAL;
+      INSERT INTO "${schema}".heap_values VALUES (-42,'dropped',9223372036854775807,repeat('héllo',36),-12345678901234567890.00120,true,'12345678-1234-5678-9012-123456789abc','2026-01-01',repeat('external',2000),repeat('compressed',2000),NULL);
+      ALTER TABLE "${schema}".heap_values DROP COLUMN gone;
+      ALTER TABLE "${schema}".heap_values ADD COLUMN added int DEFAULT 7;`);
+    const [rel] = await db!.request('relations', { q: schema + '.heap_values' });
+    const args = { oid: String(rel!.oid), block: '0' };
+    const h = await db!.request('heap', args);
+    const values = Object.fromEntries(h.items[0]!.values!.map(v => [v.name, v]));
+    assert.equal(values.id!.value, '-42'); assert.equal(values.big!.value, '9223372036854775807');
+    assert.equal(values.label!.value, JSON.stringify('héllo'.repeat(36)));
+    assert.equal(values.amount!.value, '-12345678901234567890.00120');
+    assert.equal(values.flag!.value, 'true'); assert.equal(values.u!.value, '12345678-1234-5678-9012-123456789abc');
+    assert.equal(values.optional!.value, 'NULL'); assert.equal(values.added!.state, 'absent');
+    for (const name of ['d', 'external', 'compressed']) assert.equal(values[name]!.state, 'raw');
+    assert.equal(values.gone, undefined);
+    await client!.query(`UPDATE "${schema}".heap_values SET label='changed'`);
+    const changed = await db!.request('heap', args);
+    const labels = changed.items.flatMap(i => i.values?.filter(v => v.name === 'label').map(v => v.value) ?? []);
+    assert.ok(labels.includes(JSON.stringify('héllo'.repeat(36))));
+    assert.ok(labels.includes('"changed"'));
+  });
   await t.test('maps and boundary validation', async () => { const m = await db!.request('map', { oid: oid('many_idx'), count: '4' }); assert.equal(m.pages.length, 4); await assert.rejects(db!.request('heap', { oid: oid('empty'), block: '0' })); await assert.rejects(db!.request('tree', { oid: oid('small') })); await assert.rejects(db!.request('node', { oid: oid('small_idx'), block: '0' })); });
   await t.test('readable stored values include nulls, text, large integers, numeric and composite keys', async () => {
     await client!.query(`CREATE TABLE "${schema}".typed_keys (id integer, big bigint, small smallint, t text, n numeric, b boolean, u uuid, f double precision, d date);

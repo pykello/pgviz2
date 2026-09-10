@@ -108,3 +108,26 @@ export function labelNode(node: BtreeNode, page: Buffer, context: KeyContext): B
   for (const item of node.items) { const value = decodeIndexKey(item, page, context); if (value !== undefined) item.value = value; }
   return node;
 }
+
+/** pageinspect supplies each heap attribute including its varlena header. */
+export function decodeHeapAttribute(bytes: Buffer, column: IndexColumn, little: boolean, encoding: string): string | undefined {
+  try {
+    let value = bytes;
+    if (column.length === -1) {
+      const first = bytes[0]; if (first === undefined) return undefined;
+      const short = little ? !!(first & 1) : !!(first & 0x80);
+      if (short) {
+        const length = little ? first >>> 1 : first & 0x7f;
+        if (length < 1 || length !== bytes.length) return undefined;
+        value = bytes.subarray(1);
+      } else {
+        const header = little ? bytes.readUInt32LE() : bytes.readUInt32BE();
+        if (little ? (header & 3) !== 0 : (header >>> 30) !== 0) return undefined;
+        const length = little ? header >>> 2 : header & 0x3fffffff;
+        if (length < 4 || length !== bytes.length) return undefined;
+        value = bytes.subarray(4);
+      }
+    } else if (column.length < 1 || bytes.length !== column.length) return undefined;
+    return scalar(column.oid, value, little, encoding);
+  } catch { return undefined; }
+}

@@ -327,18 +327,51 @@ function renderHeap() {
     if (offset < 24) { b.classList.add('header'); kind = 'Page header'; }
     else if (offset < h.header.lower) { b.classList.add(Math.floor((offset - 24) / 16) % 2 ? 'pointer-alt' : 'pointer'); kind = 'Line pointers'; }
     else if (tuple) { const relative = offset - tuple.lp_off; const isHeader = relative < 23; const isBitmap = !isHeader && relative < (tuple.t_hoff ?? 24) && tuple.t_bits !== null; b.classList.add(isHeader ? 'tuple-header' : isBitmap ? 'bitmap' : 'tuple'); kind = `Tuple ${tuple.lp}${isHeader ? ' header' : isBitmap ? ' bitmap / padding' : ' data'}`; }
-    b.title = `${kind} · bytes ${offset}–${offset + 15}`; b.setAttribute('aria-label', b.title);
+    b.title = `${kind} · bytes ${offset}–${offset + 15}${tuple?.values?.length ? '\n' + tuple.values.map(v => `${v.name}: ${v.value ?? (v.state === 'absent' ? 'not stored' : 'raw')}`).join(' · ') : ''}`; b.setAttribute('aria-label', b.title);
     b.onclick = () => { document.querySelectorAll('.byte-cell.selected').forEach(c => c.classList.remove('selected')); b.classList.add('selected');
       if (tuple && offset >= h.header.lower) inspectTuple(tuple);
       else { setDetails(`<h3>${esc(kind)}</h3>${offset < 24 ? fields(h.header) : `<p>Byte offset ${offset}.</p>`}<h4>BYTES ${offset}–${offset + 15}</h4><pre>${esc(h.raw.slice(offset * 2, (offset + 16) * 2).match(/../g)?.join(' '))}</pre>`); }
     }; $('bytes').append(b);
   }
+  renderHeapLabels();
   for (const i of h.items) button(`${i.lp} · ${['unused', 'normal', 'redirect', 'dead'][i.lp_flags] ?? 'unknown'}`, () => inspectTuple(i), $('tuple-buttons'));
 }
+function heapValueLabel(item: HeapItem) {
+  return item.values?.map(v => v.value ?? (v.state === 'absent' ? 'not stored' : 'raw')).join(', ') ?? '';
+}
+function renderHeapLabels() {
+  const grid = document.getElementById('bytes');
+  if (view !== 'heap' || !heap || !grid) return;
+  grid.querySelectorAll('.heap-value').forEach(label => label.remove());
+  const cells = [...grid.querySelectorAll<HTMLElement>('.byte-cell')];
+  for (const item of heap.items) {
+    const text = heapValueLabel(item);
+    if (item.lp_flags !== 1 || !text) continue;
+    // Choose the longest row segment in this tuple's data, never span a row
+    // boundary or overwrite another tuple. The byte cells remain clickable.
+    const start = item.lp_off + (item.t_hoff ?? 0), end = item.lp_off + item.lp_len;
+    if (end <= start) continue;
+    const first = Math.ceil(start / 16), last = Math.floor(end / 16) - 1;
+    let best: HTMLElement[] = [], run: HTMLElement[] = [];
+    const candidates = first <= last ? cells.slice(first, last + 1) : cells.slice(Math.floor(start / 16), Math.floor(start / 16) + 1);
+    for (const cell of candidates) {
+      if (run.length && run[0]!.offsetTop !== cell.offsetTop) run = [];
+      run.push(cell); if (run.length > best.length) best = [...run];
+    }
+    if (!best.length) continue;
+    const left = best[0]!, right = best.at(-1)!;
+    const label = document.createElement('span'); label.className = 'heap-value'; label.textContent = text;
+    label.dataset.lp = String(item.lp); label.setAttribute('aria-hidden', 'true');
+    label.style.left = `${left.offsetLeft}px`; label.style.top = `${left.offsetTop}px`;
+    label.style.width = `${right.offsetLeft + right.offsetWidth - left.offsetLeft}px`;
+    label.style.height = `${left.offsetHeight}px`; grid.append(label);
+  }
+}
+new ResizeObserver(renderHeapLabels).observe($('canvas'));
 function inspectTuple(item: HeapItem) {
   if (!heap) return; const h = heap;
   const raw = item.lp_flags === 1 ? h.raw.slice(item.lp_off * 2, (item.lp_off + item.lp_len) * 2) : '';
-  setDetails(`<span class="pill">HEAP TUPLE</span><h3>(${h.block},${item.lp})</h3><div class="actions" id="tuple-actions"></div>${fields({ State: ['Unused', 'Normal', 'HOT redirect', 'Dead'][item.lp_flags], Offset: item.lp_off, Length: item.lp_len, xmin: item.t_xmin, xmax: item.t_xmax, ctid: item.t_ctid, Flags: [...(item.raw_flags ?? []), ...(item.combined_flags ?? [])] })}<details><summary>All tuple fields & attributes</summary>${fields(item)}</details><details><summary>Tuple bytes · ${raw.length / 2} B</summary><pre>${esc(raw.match(/.{1,32}/g)?.map((s, i) => `${(item.lp_off + i * 16).toString(16).padStart(4, '0')}  ${s.match(/../g)?.join(' ')}`).join('\n') ?? '')}</pre></details>`);
+  setDetails(`<span class="pill">HEAP TUPLE</span><h3>(${h.block},${item.lp})</h3><div class="actions" id="tuple-actions"></div>${item.values?.length ? '<h4>Values</h4>' + fields(Object.fromEntries(item.values.map(v => [v.name, v.value ?? (v.state === 'absent' ? 'Not stored in this tuple' : `Raw (${v.type})`)]))) : ''}${fields({ State: ['Unused', 'Normal', 'HOT redirect', 'Dead'][item.lp_flags], Offset: item.lp_off, Length: item.lp_len, xmin: item.t_xmin, xmax: item.t_xmax, ctid: item.t_ctid, Flags: [...(item.raw_flags ?? []), ...(item.combined_flags ?? [])] })}<details><summary>All tuple fields & attributes</summary>${fields(item)}</details><details><summary>Tuple bytes · ${raw.length / 2} B</summary><pre>${esc(raw.match(/.{1,32}/g)?.map((s, i) => `${(item.lp_off + i * 16).toString(16).padStart(4, '0')}  ${s.match(/../g)?.join(' ')}`).join('\n') ?? '')}</pre></details>`);
   if (item.lp_flags === 2) button(`Follow redirect → ${item.lp_off}`, () => { const next = h.items.find(i => i.lp === item.lp_off); if (next) inspectTuple(next); }, $('tuple-actions'));
   if (item.t_ctid && item.t_ctid !== `(${h.block},${item.lp})`) button('Follow ctid →', () => run(async () => { const nextBlock = tidBlock(item.t_ctid!); if (nextBlock === null) return; block = nextBlock; await load(); const lp = Number(item.t_ctid!.split(',')[1]?.replace(')', '')); const next = heap?.items.find(i => i.lp === lp); if (next) inspectTuple(next); }), $('tuple-actions'));
 }
