@@ -17,7 +17,9 @@ watch new activity after refreshing.
 Heap data cells show decoded tuple values where supported, clipped with an
 ellipsis to fit the available space. Hover a tuple cell or select it for
 full values and column names. Labels use the captured page bytes, including
-older tuple versions. Unknown types and compressed/external TOAST values
+older tuple versions. Click a line pointer in the grid or the pointer list
+to outline its target tuple; redirect pointers follow their destination.
+Unknown types and compressed/external TOAST values
 remain raw; columns absent from an older tuple are marked as not stored.
 
 ## Run

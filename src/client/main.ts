@@ -16,6 +16,7 @@ let walSettings = { mode: 'physical' as 'physical' | 'logical', filter: '' };
 let tree: Tree | undefined, heap: HeapPage | undefined, map: PageMap | undefined;
 let depth = 2, block = 0, mapStart = 0, focusRoot: number | undefined;
 let endian: 'auto' | 'raw' | 'little' | 'big' = 'auto', selected: number | undefined;
+let selectedHeap: number | undefined;
 let requestId = 0, detailId = 0, searchId = 0, filterTimer: ReturnType<typeof setTimeout>;
 let snapshot: unknown, baseline: Tree | undefined, changed = new Set<number>();
 const walView = new WalView({ canvas: $('canvas'), controls: $('view-controls'), details: setDetails, snapshot: data => { snapshot = data; }, settings: settings => { const replace = walSettings.mode === settings.mode; walSettings = settings; writeLocation(replace); } });
@@ -28,7 +29,7 @@ async function api<K extends Route>(route: K, args: Record<string, string | numb
 }
 function fail(e: unknown) { $('error').hidden = false; $('error').textContent = e instanceof Error ? e.message : String(e); }
 function run(action: () => Promise<void>) { void action().catch(fail); }
-function emptyInspector() { selected = undefined; detailId++; $('details').replaceChildren(); $('inspector').hidden = true; $('workarea').classList.remove('has-selection'); document.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected')); }
+function emptyInspector() { selectedHeap = undefined; document.querySelectorAll('.tuple-outline').forEach(el => el.remove()); document.querySelectorAll('[data-pointer]').forEach(el => el.setAttribute('aria-pressed', 'false')); selected = undefined; detailId++; $('details').replaceChildren(); $('inspector').hidden = true; $('workarea').classList.remove('has-selection'); document.querySelectorAll('.node.selected').forEach(n => n.classList.remove('selected')); }
 function setDetails(html: string) { $('inspector').hidden = false; $('workarea').classList.add('has-selection'); $('details').innerHTML = html; }
 function renderRelations() {
   if (view === 'home') {
@@ -333,18 +334,45 @@ function renderHeap() {
       else { setDetails(`<h3>${esc(kind)}</h3>${offset < 24 ? fields(h.header) : `<p>Byte offset ${offset}.</p>`}<h4>BYTES ${offset}–${offset + 15}</h4><pre>${esc(h.raw.slice(offset * 2, (offset + 16) * 2).match(/../g)?.join(' '))}</pre>`); }
     }; $('bytes').append(b);
   }
-  renderHeapLabels();
-  for (const i of h.items) button(`${i.lp} · ${['unused', 'normal', 'redirect', 'dead'][i.lp_flags] ?? 'unknown'}`, () => inspectTuple(i), $('tuple-buttons'));
+  renderHeapOverlays();
+  for (const i of h.items) {
+    const b = document.createElement('button'); b.textContent = `${i.lp} · ${['unused', 'normal', 'redirect', 'dead'][i.lp_flags] ?? 'unknown'}`;
+    b.dataset.pointer = String(i.lp); b.setAttribute('aria-pressed', 'false'); b.onclick = () => inspectTuple(i); $('tuple-buttons').append(b);
+  }
 }
 function heapValueLabel(item: HeapItem) {
   return item.values?.map(v => v.value ?? (v.state === 'absent' ? 'not stored' : 'raw')).join(', ') ?? '';
 }
-function renderHeapLabels() {
+function renderHeapOverlays() {
   const grid = document.getElementById('bytes');
   if (view !== 'heap' || !heap || !grid) return;
-  grid.querySelectorAll('.heap-value').forEach(label => label.remove());
+  grid.querySelectorAll('.heap-value, .heap-pointer, .tuple-outline').forEach(label => label.remove());
   const cells = [...grid.querySelectorAll<HTMLElement>('.byte-cell')];
+  const rectangles = (start: number, end: number) => {
+    const rows: { left: number; top: number; right: number; height: number }[] = [];
+    if (start < 0 || end > heap!.header.pagesize || end <= start) return rows;
+    for (let i = Math.floor(start / 16); i < Math.ceil(end / 16); i++) {
+      const cell = cells[i]; if (!cell) continue;
+      const left = cell.offsetLeft + Math.max(0, start - i * 16) / 16 * cell.offsetWidth;
+      const right = cell.offsetLeft + Math.min(16, end - i * 16) / 16 * cell.offsetWidth;
+      const row = rows.at(-1);
+      if (row?.top === cell.offsetTop) row.right = right;
+      else rows.push({ left, right, top: cell.offsetTop, height: cell.offsetHeight });
+    }
+    return rows;
+  };
+  const position = (el: HTMLElement, r: ReturnType<typeof rectangles>[number]) => {
+    Object.assign(el.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.right - r.left}px`, height: `${r.height}px` });
+  };
   for (const item of heap.items) {
+    const pointerStart = 24 + (item.lp - 1) * 4;
+    for (const rect of rectangles(pointerStart, pointerStart + 4)) {
+      const pointer = document.createElement('button'); pointer.className = 'heap-pointer';
+      pointer.dataset.pointer = String(item.lp); pointer.setAttribute('aria-label', `Line pointer ${item.lp}`);
+      pointer.title = `Line pointer ${item.lp} · ${['unused', 'normal', 'redirect', 'dead'][item.lp_flags] ?? 'unknown'}`;
+      pointer.setAttribute('aria-pressed', String(selectedHeap === item.lp));
+      pointer.onclick = () => inspectTuple(item); position(pointer, rect); grid.append(pointer);
+    }
     const text = heapValueLabel(item);
     if (item.lp_flags !== 1 || !text) continue;
     // Choose the longest row segment in this tuple's data, never span a row
@@ -366,10 +394,23 @@ function renderHeapLabels() {
     label.style.width = `${right.offsetLeft + right.offsetWidth - left.offsetLeft}px`;
     label.style.height = `${left.offsetHeight}px`; grid.append(label);
   }
+  document.querySelectorAll<HTMLElement>('[data-pointer]').forEach(el => el.setAttribute('aria-pressed', String(Number(el.dataset.pointer) === selectedHeap)));
+  let target = heap.items.find(i => i.lp === selectedHeap);
+  const seen = new Set<number>();
+  while (target?.lp_flags === 2 && !seen.has(target.lp)) {
+    seen.add(target.lp); target = heap.items.find(i => i.lp === target!.lp_off);
+  }
+  if (target?.lp_flags === 1 && target.lp_len > 0) {
+    for (const rect of rectangles(target.lp_off, target.lp_off + target.lp_len)) {
+      const outline = document.createElement('span'); outline.className = 'tuple-outline';
+      outline.dataset.lp = String(target.lp); outline.setAttribute('aria-hidden', 'true');
+      position(outline, rect); grid.append(outline);
+    }
+  }
 }
-new ResizeObserver(renderHeapLabels).observe($('canvas'));
+new ResizeObserver(renderHeapOverlays).observe($('canvas'));
 function inspectTuple(item: HeapItem) {
-  if (!heap) return; const h = heap;
+  if (!heap) return; const h = heap; selectedHeap = item.lp; renderHeapOverlays();
   const raw = item.lp_flags === 1 ? h.raw.slice(item.lp_off * 2, (item.lp_off + item.lp_len) * 2) : '';
   setDetails(`<span class="pill">HEAP TUPLE</span><h3>(${h.block},${item.lp})</h3><div class="actions" id="tuple-actions"></div>${item.values?.length ? '<h4>Values</h4>' + fields(Object.fromEntries(item.values.map(v => [v.name, v.value ?? (v.state === 'absent' ? 'Not stored in this tuple' : `Raw (${v.type})`)]))) : ''}${fields({ State: ['Unused', 'Normal', 'HOT redirect', 'Dead'][item.lp_flags], Offset: item.lp_off, Length: item.lp_len, xmin: item.t_xmin, xmax: item.t_xmax, ctid: item.t_ctid, Flags: [...(item.raw_flags ?? []), ...(item.combined_flags ?? [])] })}<details><summary>All tuple fields & attributes</summary>${fields(item)}</details><details><summary>Tuple bytes · ${raw.length / 2} B</summary><pre>${esc(raw.match(/.{1,32}/g)?.map((s, i) => `${(item.lp_off + i * 16).toString(16).padStart(4, '0')}  ${s.match(/../g)?.join(' ')}`).join('\n') ?? '')}</pre></details>`);
   if (item.lp_flags === 2) button(`Follow redirect → ${item.lp_off}`, () => { const next = h.items.find(i => i.lp === item.lp_off); if (next) inspectTuple(next); }, $('tuple-actions'));

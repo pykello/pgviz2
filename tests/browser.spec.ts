@@ -186,3 +186,38 @@ test('heap values fit the byte cells and remain readable in the inspector', asyn
   await expect(page.locator('#details')).toContainText('Customer 1 · example order');
   await expect(page.locator('#details')).toContainText('NULL');
 });
+
+test('line pointers outline their tuple across grid rows and clear selection', async ({ page }) => {
+  await page.goto('/?view=heap&oid=2');
+  await page.getByRole('button', { name: 'Line pointer 9', exact: true }).click();
+  await expect(page.locator('.tuple-outline')).toHaveCount(2);
+  await expect(page.locator('.tuple-outline').first()).toHaveAttribute('data-lp', '9');
+  await expect(page.locator('#details h3')).toHaveText('(0,9)');
+  await page.locator('#line-pointers > summary').click();
+  await page.getByRole('button', { name: '1 · normal', exact: true }).click();
+  await expect(page.locator('.tuple-outline')).toHaveCount(1);
+  await expect(page.locator('.tuple-outline')).toHaveAttribute('data-lp', '1');
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await expect.poll(() => page.locator('.tuple-outline').evaluate(el => {
+    const r = el.getBoundingClientRect(), grid = el.parentElement!.getBoundingClientRect();
+    return r.left >= grid.left && r.right <= grid.right && r.top >= grid.top && r.bottom <= grid.bottom;
+  })).toBe(true);
+  await page.getByRole('button', { name: 'Clear selection', exact: true }).click();
+  await expect(page.locator('.tuple-outline')).toHaveCount(0);
+  await expect(page.locator('[data-pointer][aria-pressed=true]')).toHaveCount(0);
+});
+
+test('redirect line pointers highlight the target and dead pointers clear it', async ({ page }) => {
+  await page.route('**/api/heap?*', async route => {
+    const response = await route.fetch(); const data = await response.json();
+    Object.assign(data.items[0], { lp_flags: 2, lp_off: 2, lp_len: 0 });
+    Object.assign(data.items[2], { lp_flags: 3, lp_off: 0, lp_len: 0 });
+    await route.fulfill({ response, json: data });
+  });
+  await page.goto('/?view=heap&oid=2');
+  await page.getByRole('button', { name: 'Line pointer 1', exact: true }).click();
+  await expect(page.locator('.tuple-outline')).toHaveAttribute('data-lp', '2');
+  await page.getByRole('button', { name: 'Line pointer 3', exact: true }).click();
+  await expect(page.locator('.tuple-outline')).toHaveCount(0);
+  await expect(page.locator('#details')).toContainText('Dead');
+});
