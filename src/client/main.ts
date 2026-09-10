@@ -1,4 +1,5 @@
 import './style.css';
+import { heapRegions } from '../shared/heap-layout';
 import { readLocation, locationSearch, type View } from '../shared/location';
 import { WalView } from './wal-view';
 import { templates, commandSql, type Command, type CommandResult } from '../shared/commands';
@@ -319,19 +320,31 @@ async function followTid(tid: string) {
 function renderHeap() {
   if (!heap) return; const h = heap;
   scene = undefined; $('canvas-controls').hidden = true; $('canvas').className = ''; $('breadcrumbs').textContent = `${h.relation.qualified} / main / block ${h.block}`;
-  $('legend').innerHTML = '<span><i class="dot header"></i>Header</span><span><i class="dot internal"></i>Pointers</span><span><i class="dot tuple"></i>Tuples</span><span><i class="dot free"></i>Free</span>';
+  $('legend').innerHTML = '<span><i class="dot header"></i>Header</span><span><i class="dot internal"></i>Pointers</span><span><i class="dot tuple"></i>Tuples (striped header)</span><span><i class="dot free"></i>Free</span>';
   $('canvas').innerHTML = `<div class="heap-wrap"><p>16 bytes per cell</p><div class="heap-strip"><span class="pointers" style="width:${h.header.lower / h.header.pagesize * 100}%"></span><span class="free" style="width:${(h.header.upper - h.header.lower) / h.header.pagesize * 100}%">${fmt(h.header.upper - h.header.lower)} bytes free</span><span class="used" style="width:${(h.header.pagesize - h.header.upper) / h.header.pagesize * 100}%">Tuple storage</span></div><div class="byte-grid" id="bytes"></div><details id="line-pointers"><summary>Line pointers (${h.items.length})</summary><div class="actions" id="tuple-buttons"></div></details></div>`;
+  const regions = heapRegions(h);
   for (let offset = 0; offset < h.header.pagesize; offset += 16) {
-    const b = document.createElement('button'); b.className = 'byte-cell';
-    const tuple = h.items.find(i => i.lp_flags === 1 && i.lp_len > 0 && offset < i.lp_off + i.lp_len && offset + 16 > i.lp_off);
-    let kind = 'Free / unallocated';
-    if (offset < 24) { b.classList.add('header'); kind = 'Page header'; }
-    else if (offset < h.header.lower) { b.classList.add(Math.floor((offset - 24) / 16) % 2 ? 'pointer-alt' : 'pointer'); kind = 'Line pointers'; }
-    else if (tuple) { const relative = offset - tuple.lp_off; const isHeader = relative < 23; const isBitmap = !isHeader && relative < (tuple.t_hoff ?? 24) && tuple.t_bits !== null; b.classList.add(isHeader ? 'tuple-header' : isBitmap ? 'bitmap' : 'tuple'); kind = `Tuple ${tuple.lp}${isHeader ? ' header' : isBitmap ? ' bitmap / padding' : ' data'}`; }
-    b.title = `${kind} · bytes ${offset}–${offset + 15}${tuple?.values?.length ? '\n' + tuple.values.map(v => `${v.name}: ${v.value ?? (v.state === 'absent' ? 'not stored' : 'raw')}`).join(' · ') : ''}`; b.setAttribute('aria-label', b.title);
-    b.onclick = () => { document.querySelectorAll('.byte-cell.selected').forEach(c => c.classList.remove('selected')); b.classList.add('selected');
-      if (tuple && offset >= h.header.lower) inspectTuple(tuple);
-      else { setDetails(`<h3>${esc(kind)}</h3>${offset < 24 ? fields(h.header) : `<p>Byte offset ${offset}.</p>`}<h4>BYTES ${offset}–${offset + 15}</h4><pre>${esc(h.raw.slice(offset * 2, (offset + 16) * 2).match(/../g)?.join(' '))}</pre>`); }
+    const b = document.createElement('button'); b.className = 'byte-cell'; b.dataset.offset = String(offset);
+    const parts = regions.filter(r => r.start < offset + 16 && r.end > offset);
+    b.title = `${parts.map(r => r.label).join(' / ') || 'Free / unallocated'} · bytes ${offset}–${offset + 15}`;
+    b.setAttribute('aria-label', b.title);
+    for (const region of parts) {
+      const start = Math.max(offset, region.start), end = Math.min(offset + 16, region.end);
+      const part = document.createElement('span'); part.className = `heap-byte-region ${region.kind}`;
+      part.dataset.start = String(start); part.dataset.end = String(end);
+      if (region.tuple) part.dataset.lp = String(region.tuple.lp);
+      part.style.left = `${(start - offset) / 16 * 100}%`; part.style.width = `${(end - start) / 16 * 100}%`;
+      part.title = `${region.label} · bytes ${start}–${end - 1}${region.tuple?.values?.length ? '\n' + region.tuple.values.map(v => `${v.name}: ${v.value ?? (v.state === 'absent' ? 'not stored' : 'raw')}`).join(' · ') : ''}`;
+      b.append(part);
+    }
+    b.onclick = e => {
+      document.querySelectorAll('.byte-cell.selected').forEach(c => c.classList.remove('selected')); b.classList.add('selected');
+      // Mouse clicks use the exact byte fragment; keyboard clicks use the
+      // first region in the cell. Pointer buttons remain individually usable.
+      const fragment = (e.target as HTMLElement).closest<HTMLElement>('.heap-byte-region');
+      const tuple = fragment ? h.items.find(i => i.lp === Number(fragment.dataset.lp)) : e.detail === 0 ? parts.find(r => r.tuple)?.tuple : undefined;
+      if (tuple) inspectTuple(tuple);
+      else { emptyInspector(); setDetails(`<h3>${esc(fragment?.title.split(' · bytes')[0] ?? b.title.split(' · bytes')[0])}</h3>${offset < 24 ? fields(h.header) : `<p>Byte offset ${offset}.</p>`}<h4>BYTES ${offset}–${offset + 15}</h4><pre>${esc(h.raw.slice(offset * 2, (offset + 16) * 2).match(/../g)?.join(' '))}</pre>`); }
     }; $('bytes').append(b);
   }
   renderHeapOverlays();
@@ -379,20 +392,11 @@ function renderHeapOverlays() {
     // boundary or overwrite another tuple. The byte cells remain clickable.
     const start = item.lp_off + (item.t_hoff ?? 0), end = item.lp_off + item.lp_len;
     if (end <= start) continue;
-    const first = Math.ceil(start / 16), last = Math.floor(end / 16) - 1;
-    let best: HTMLElement[] = [], run: HTMLElement[] = [];
-    const candidates = first <= last ? cells.slice(first, last + 1) : cells.slice(Math.floor(start / 16), Math.floor(start / 16) + 1);
-    for (const cell of candidates) {
-      if (run.length && run[0]!.offsetTop !== cell.offsetTop) run = [];
-      run.push(cell); if (run.length > best.length) best = [...run];
-    }
-    if (!best.length) continue;
-    const left = best[0]!, right = best.at(-1)!;
+    const best = rectangles(start, end).sort((a, b) => (b.right - b.left) - (a.right - a.left))[0];
+    if (!best) continue;
     const label = document.createElement('span'); label.className = 'heap-value'; label.textContent = text;
     label.dataset.lp = String(item.lp); label.setAttribute('aria-hidden', 'true');
-    label.style.left = `${left.offsetLeft}px`; label.style.top = `${left.offsetTop}px`;
-    label.style.width = `${right.offsetLeft + right.offsetWidth - left.offsetLeft}px`;
-    label.style.height = `${left.offsetHeight}px`; grid.append(label);
+    position(label, best); grid.append(label);
   }
   document.querySelectorAll<HTMLElement>('[data-pointer]').forEach(el => el.setAttribute('aria-pressed', String(Number(el.dataset.pointer) === selectedHeap)));
   let target = heap.items.find(i => i.lp === selectedHeap);

@@ -188,7 +188,7 @@ test('heap values fit the byte cells and remain readable in the inspector', asyn
     if (!el) return false;
     const r = el.getBoundingClientRect();
     const target = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return target?.classList.contains('byte-cell') && target.getAttribute('title')?.startsWith('Tuple 1 ');
+    return target?.classList.contains('heap-byte-region') && target.getAttribute('data-lp') === '1';
   })).toBe(true);
   const box = await label.boundingBox();
   await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
@@ -229,4 +229,30 @@ test('redirect line pointers highlight the target and dead pointers clear it', a
   await page.getByRole('button', { name: 'Line pointer 3', exact: true }).click();
   await expect(page.locator('.tuple-outline')).toHaveCount(0);
   await expect(page.locator('#details')).toContainText('Dead');
+});
+
+test('shared cells clip header stripes and select the clicked tuple fragment', async ({ page }) => {
+  await page.route('**/api/heap?*', async route => {
+    const response = await route.fetch(); const data = await response.json();
+    // Tuple 2 ends halfway through a cell, exactly where tuple 1 begins.
+    data.items[1].lp_len = 120;
+    await route.fulfill({ response, json: data });
+  });
+  await page.goto('/?view=heap&oid=2');
+  const cell = page.locator('.byte-cell[data-offset="8064"]');
+  const header = cell.locator('.tuple-header');
+  await expect(header).toHaveAttribute('data-start', '8072');
+  await expect(header).toHaveAttribute('data-end', '8080');
+  await expect(header).toHaveAttribute('data-lp', '1');
+  expect(await header.evaluate(el => el.style.left)).toBe('50%');
+  expect(await header.evaluate(el => el.style.width)).toBe('50%');
+  await cell.locator('.heap-byte-region[data-lp="2"]').click();
+  await expect(page.locator('#details h3')).toHaveText('(0,2)');
+  await header.click();
+  await expect(page.locator('#details h3')).toHaveText('(0,1)');
+  await expect.poll(() => page.evaluate(() => {
+    const h = document.querySelector('.byte-cell[data-offset="8064"] .tuple-header')!.getBoundingClientRect();
+    const outline = document.querySelector('.tuple-outline[data-lp="1"]')!.getBoundingClientRect();
+    return Math.abs(h.left - outline.left) < 1 && Math.abs(h.top - outline.top) < 1;
+  })).toBe(true);
 });

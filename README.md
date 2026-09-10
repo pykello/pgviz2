@@ -19,6 +19,9 @@ ellipsis to fit the available space. Hover a tuple cell or select it for
 full values and column names. Labels use the captured page bytes, including
 older tuple versions. Click a line pointer in the grid or the pointer list
 to outline its target tuple; redirect pointers follow their destination.
+Each 16-byte cell is subdivided at exact byte boundaries: stripes mark
+tuple headers and null bitmaps, gray marks header padding, and data labels
+stay within the data region. Clicking a fragment selects its own tuple.
 Unknown types and compressed/external TOAST values
 remain raw; columns absent from an older tuple are marked as not stored.
 
